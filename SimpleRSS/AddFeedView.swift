@@ -13,6 +13,7 @@ struct AddFeedView: View {
     @State private var isValidating = false
     @State private var validationError: String? = nil
     @State private var showingError = false
+    @Binding var isPresented: Bool
     
     var onAdd: (String, String) -> Void
 
@@ -41,19 +42,23 @@ struct AddFeedView: View {
                 HStack {
                     Spacer()
                     Button("Cancel") {
+                        isPresented = false
                         onAdd("", "") // Maintain your existing pattern for cancel
                     }
                     .disabled(isValidating)
-                    
+                    .keyboardShortcut(.cancelAction)
+
                     Button(isValidating ? "Validating..." : "Add") {
                         validateAndAdd()
                     }
                     .disabled(name.isEmpty || url.isEmpty || isValidating)
+                    .keyboardShortcut(.defaultAction)
                 }
                 .padding(.horizontal)
             }
             .padding()
             .frame(width: 400)
+            
         }
         
         private func validateAndAdd() {
@@ -105,8 +110,46 @@ struct AddFeedView: View {
                     
                     // If we get here, the feed is valid
                     onAdd(name, url)
+                    isPresented = false
                 }
             }
             task.resume()
         }
+}
+
+struct KeyPressHandler: NSViewRepresentable {
+    let key: KeyEquivalent
+    let action: () -> Void
+    
+    func makeNSView(context: Context) -> NSView {
+        let view = KeyView()
+        view.key = key
+        view.action = action
+        DispatchQueue.main.async {
+            view.window?.makeFirstResponder(view)
+        }
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let view = nsView as? KeyView {
+            view.key = key
+            view.action = action
+        }
+    }
+    
+    class KeyView: NSView {
+        var key: KeyEquivalent = .escape
+        var action: (() -> Void)? = nil
+        
+        override var acceptsFirstResponder: Bool { true }
+        
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 53 { // Escape key code
+                action?()
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
 }

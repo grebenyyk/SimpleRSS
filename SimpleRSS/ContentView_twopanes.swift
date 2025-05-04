@@ -63,7 +63,7 @@ struct ContentViewww: View {
                     
                 .padding()
                 .sheet(isPresented: $isShowingAddFeed) {
-                            AddFeedView { name, url in
+                            AddFeedView (isPresented: $isShowingAddFeed) { name, url in
                                 let newFeed = FeedSource(id: UUID(), name: name, url: url)
                                 feedSources.append(newFeed)
                                 selectedFeed = newFeed

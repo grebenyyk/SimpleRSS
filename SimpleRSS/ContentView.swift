@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct EditFeedView: View {
     @Binding var feedToEdit: FeedSource?
@@ -35,17 +36,12 @@ struct EditFeedView: View {
 
 
 struct ContentView: View {
-    @StateObject private var viewModel = FeedViewModel()
-    @State private var showAddFeedSheet = false
-    @State private var showEditSheet = false
+    @EnvironmentObject var viewModel: FeedViewModel
     @State private var isShowingAddFeed = false
     @State private var feedToEdit: FeedSource?
     @State private var editedName = ""
     @State private var editedURL = ""
-    @State private var newFeedName = ""
-    @State private var newFeedURL = ""
-    @State private var selectedFeed: FeedSource? = nil
-    @State private var feedSources: [FeedSource] = []
+    @State private var showEditSheet = false
     
     var body: some View {
         NavigationSplitView {
@@ -60,7 +56,16 @@ struct ContentView: View {
                 VStack {
                     List(selection: $viewModel.selectedSource) {
                         ForEach(viewModel.feedSources) { source in
-                            Text(source.name)
+                            HStack {
+                                    Text(source.name)
+                                        Spacer()
+                                        // Use only one condition to show the circle
+                                        if viewModel.sourcesWithUnreadItems.contains(source.id) {
+                                            Circle()
+                                                .fill(Color.gray)
+                                                .frame(width: 4, height: 4)
+                                        }
+                                    }
                                 .tag(source)
                                 .contextMenu {
                                     Button("Edit") {
@@ -68,6 +73,11 @@ struct ContentView: View {
                                         editedName = source.name
                                         editedURL = source.url
                                         showEditSheet = true
+                                    }
+                                    Button("Mark All as Read") {
+                                        if viewModel.selectedSource?.id == source.id {
+                                            viewModel.markAllAsRead()
+                                        }
                                     }
                                     Button("Delete", role: .destructive) {
                                         viewModel.deleteFeedSource(source)
@@ -78,6 +88,7 @@ struct ContentView: View {
                     
                     .onChange(of: viewModel.selectedSource) {
                         viewModel.loadSelectedFeed()
+                        viewModel.objectWillChange.send()
                     }
                     
                     .frame(height: CGFloat(viewModel.feedSources.count * 32), alignment: .top)
@@ -90,20 +101,15 @@ struct ContentView: View {
                     .padding()
                 }
             }
-                .sheet(isPresented: $isShowingAddFeed) {
-                    AddFeedView { name, url in
-                        if !name.isEmpty && !url.isEmpty {  // Only proceed if we have valid data
-                            let newFeed = FeedSource(id: UUID(), name: name, url: url)
-                            feedSources.append(newFeed)
-                            selectedFeed = newFeed
-                            viewModel.loadFeed(from: url)
-                            viewModel.addFeedSource(name: name, url: url)
-                            newFeedName = ""
-                            newFeedURL = ""
-                        }
-                        isShowingAddFeed = false
+            .sheet(isPresented: $isShowingAddFeed) {
+                AddFeedView(isPresented: $isShowingAddFeed) { name, url in
+                    if !name.isEmpty && !url.isEmpty {
+                        viewModel.addFeedSource(name: name, url: url)
                     }
                 }
+            }
+
+
                 
                 .sheet(isPresented: $showEditSheet) {
                     EditFeedView(feedToEdit: $feedToEdit, editedName: $editedName, editedURL: $editedURL) { name, url in
@@ -130,7 +136,10 @@ struct ContentView: View {
                                 .font(.title2)
                             Spacer()
                             Button("Refresh") {
-                                viewModel.loadSelectedFeed()
+                                viewModel.forceRefreshSelectedFeed()
+                            }
+                            Button("Mark All as Read") {
+                                viewModel.markAllAsRead()
                             }
                         }
                         .padding()
@@ -141,23 +150,62 @@ struct ContentView: View {
                         } else {
                             List(viewModel.feedItems) { item in
                                 if let url = URL(string: item.link) {
-                                    Link(destination: url) {
+                                    Button {
+                                        // First mark as read
+                                        viewModel.markAsRead(item: item)
+                                        // Then open the URL
+                                        NSWorkspace.shared.open(url)
+                                    } label: {
                                         HStack {
                                             Text(item.title)
-                                                .fontWeight(viewModel.isNew(item: item) ? .bold : .regular)
+                                                .fontWeight(viewModel.isRead(item: item) ? .regular : .bold)
+                                                .foregroundColor(viewModel.isRead(item: item) ? .secondary : .primary)
                                             Spacer()
+                                            if !viewModel.isRead(item: item) {
+                                                Circle()
+                                                    .fill(Color.blue)
+                                                    .frame(width: 8, height: 8)
+                                            }
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .contextMenu {
+                                        Button("Open in Browser") {
+                                            viewModel.markAsRead(item: item)
+                                            NSWorkspace.shared.open(url)
+                                        }
+                                        
+                                        if viewModel.isRead(item: item) {
+                                            Button("Mark as Unread") {
+                                                viewModel.markAsUnread(item: item)
+                                            }
+                                        } else {
+                                            Button("Mark as Read") {
+                                                viewModel.markAsRead(item: item)
+                                            }
                                         }
                                     }
                                 }
                             }
+
                         }
                     }
                 }
             }
-        .focusable()
-        .onKeyPress(.escape) {
-            viewModel.selectedSource = nil
-            return .handled
-        }
+            .focusable(true)
+                    .onKeyPress(.escape) {
+                        if isShowingAddFeed {
+                            isShowingAddFeed = false
+                            return .handled
+                        } else if showEditSheet {
+                            showEditSheet = false
+                            return .handled
+                        } else if viewModel.selectedSource != nil {
+                            viewModel.clearSelection()
+                            return .handled
+                        }
+                        return .ignored
+                    }
     }
 }

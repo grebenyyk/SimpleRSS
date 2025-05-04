@@ -3,18 +3,49 @@
 
 import SwiftUI
 import Foundation
+import Combine
 
-struct FeedItem: Identifiable {
-    let id = UUID()
+struct FeedItem: Identifiable, Codable, Equatable {
+    var id: UUID { UUID(uuidString: link) ?? UUID() }
     let title: String
     let link: String
+    var isRead: Bool = false
+    
+    static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
+        return lhs.link == rhs.link
+    }
 }
+
+struct ReadState: Codable {
+    var readLinks: Set<String> = []
+    var lastReadDates: [String: Date] = [:]
+    }
+
 
 struct FeedSource: Identifiable, Equatable, Hashable, Codable {
     let id : UUID
     let name: String
     let url: String
 }
+
+struct CacheData: Codable {
+    var feedCache: [String: [FeedItem]]
+    var lastFetchTimes: [String: Date]
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var viewModel: FeedViewModel?
+    
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        viewModel?.refreshUnreadStatus() // Assuming you created this public method
+    }
+    
+    func applicationDidBecomeActive(_ notification: Notification) {
+        viewModel?.refreshUnreadStatus()
+    }
+}
+
+
 
 class FeedViewModel: ObservableObject {
     @Published var feedSources: [FeedSource] = [] {
@@ -29,26 +60,69 @@ class FeedViewModel: ObservableObject {
     }
     @Published var feedItems: [FeedItem] = []
     @Published var isLoading = false
+    @Published var readLinks: Set<String> = [] {
+        didSet {
+            saveReadState()
+        }
+    }
+    @Published var sourcesWithUnreadItems: Set<UUID> = []
     
     private var seenLinks: Set<String> = []
-    
     private let feedsFileName = "feeds.json"
-    
+    private let readStateFileName = "readstate.json"
+    private var feedCache: [String: [FeedItem]] = [:]
+    private var lastFetchTimes: [String: Date] = [:]
+    private let cacheDuration: TimeInterval = 10 * 60 // 10 minutes
+    private var cancellables = Set<AnyCancellable>()
+
     init() {
         loadFeeds()
+        loadReadState()
+        loadFeedCache()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.updateUnreadStatus()
+        }
+        
+        Timer.publish(every: 30, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.updateUnreadStatus()
+            }
+            .store(in: &cancellables)
+
     }
 
     private var feedsFileURL: URL? {
+            getFileURL(for: feedsFileName)
+        }
+        
+        private var readStateFileURL: URL? {
+            getFileURL(for: readStateFileName)
+        }
+    
+    func getFileURL(for fileName: String) -> URL? {
         let fileManager = FileManager.default
         guard let documentsURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
         let appSupportURL = documentsURL.appendingPathComponent("SimpleRSSReader")
+        
+        // Create directory if needed
         if !fileManager.fileExists(atPath: appSupportURL.path) {
-            try? fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true, attributes: nil)
+            do {
+                try fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
+                print("✅ Created directory at: \(appSupportURL.path)")
+            } catch {
+                print("❌ Failed to create directory: \(error)")
+                return nil
+            }
         }
-        return appSupportURL.appendingPathComponent(feedsFileName)
+        
+        let fileURL = appSupportURL.appendingPathComponent(fileName)
+        print("📄 Using file URL: \(fileURL.path)")
+        return fileURL
     }
+
     
     func saveFeeds() {
         guard let url = feedsFileURL else { return }
@@ -56,35 +130,77 @@ class FeedViewModel: ObservableObject {
             let encoder = JSONEncoder()
             let data = try encoder.encode(feedSources)
             try data.write(to: url)
-        } catch {
-            print("Failed to save feeds: \(error)")
+            print("✅ Saved \(feedSources.count) feeds to:\n\(url.path)")
+                } catch {
+                    print("❌ Failed to save feeds: \(error)")
         }
+    }
+    
+    deinit {
+        saveFeeds()
+        saveReadState()
     }
     
     func loadFeeds() {
         guard let url = feedsFileURL else { return }
         do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            let savedFeeds = try decoder.decode([FeedSource].self, from: data)
-            DispatchQueue.main.async {
-                self.feedSources = savedFeeds
-                self.selectedSource = savedFeeds.first
-                if let firstURL = savedFeeds.first?.url {
-                    self.loadFeed(from: firstURL)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                let decoder = JSONDecoder()
+                let savedFeeds = try decoder.decode([FeedSource].self, from: data)
+                DispatchQueue.main.async {
+                    self.feedSources = savedFeeds
+                    self.selectedSource = savedFeeds.first
+                    if let firstURL = savedFeeds.first?.url {
+                        self.loadFeed(from: firstURL)
+                    }
                 }
             }
         } catch {
             print("Failed to load feeds: \(error)")
+            self.feedSources = []
+        }
+    }
+    
+    func saveReadState() {
+        guard let url = readStateFileURL else { return }
+        do {
+            let readState = ReadState(readLinks: readLinks)
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(readState)
+            try data.write(to: url, options: .atomic)
+            print("Successfully saved read state with \(readLinks.count) items")
+            } catch {
+                print("Failed to save read state: \(error)")
+            }
+        }
+    func saveReadStateIfNeeded() {
+        saveReadState()
+    }
+    
+    func loadReadState() {
+        guard let url = readStateFileURL else { return }
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                let decoder = JSONDecoder()
+                let savedReadState = try decoder.decode(ReadState.self, from: data)
+                self.readLinks = savedReadState.readLinks
+                print("Successfully loaded read state with \(savedReadState.readLinks.count) items")
+            }
+        } catch {
+            print("Failed to load read state: \(error)")
         }
     }
     
     func addFeedSource(name: String, url: String) {
         guard !feedSources.contains(where: { $0.url == url }) else { return }
         let newSource = FeedSource(id: UUID(), name: name, url: url)
-        feedSources.append(newSource)
-        selectedSource = newSource              // <— set it as selected
-        loadFeed(from: url)                     // <— trigger loading
+        DispatchQueue.main.async { [weak self] in
+                self?.feedSources.append(newSource)
+                self?.selectedSource = newSource
+                self?.loadFeed(from: url)
+            }
     }
 
     func loadSelectedFeed() {
@@ -117,24 +233,184 @@ class FeedViewModel: ObservableObject {
             isLoading = false
             return
         }
-
-        let task = URLSession.shared.dataTask(with: url) { data, response, error in
-                DispatchQueue.main.async {
-                    // Set loading to false regardless of success or failure
-                    self.isLoading = false
-                    
-                    guard let data = data else { return }
-                    let parser = RSSParser(data: data)
-                    let items = parser.parse()
-                    self.feedItems = items
-                    self.seenLinks.formUnion(items.map { $0.link })
-                }
+        
+        // Check if we have a recent cache
+        let now = Date()
+        if let lastFetch = lastFetchTimes[urlString],
+           now.timeIntervalSince(lastFetch) < cacheDuration,
+           let cachedItems = feedCache[urlString] {
+            // Use cached data if it's recent enough
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.feedItems = cachedItems
+                print("Using cached data for \(urlString)")
             }
-            task.resume()
+            return
         }
+        
+        // Otherwise fetch fresh data
+        isLoading = true
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                
+                guard let data = data else {
+                    // If we have cached data, use it as fallback
+                    if let cachedItems = self.feedCache[urlString] {
+                        self.feedItems = cachedItems
+                        print("Network error, using cached data for \(urlString)")
+                    }
+                    return
+                }
+                
+                let parser = RSSParser(data: data)
+                let newItems = parser.parse()
+                
+                // Merge with existing items to preserve read states
+                self.updateFeedItems(urlString: urlString, newItems: newItems)
+                
+                // Update cache
+                self.feedCache[urlString] = self.feedItems
+                self.lastFetchTimes[urlString] = now
+                self.updateUnreadStatus()
+                
+                // Save cache to disk
+                self.saveFeedCache()
+            }
+        }
+        task.resume()
+    }
 
+    private func updateFeedItems(urlString: String, newItems: [FeedItem]) {
+        // Get existing items
+        let existingItems = feedCache[urlString] ?? []
+        
+        // Find truly new items (not in existing items)
+        let existingLinks = Set(existingItems.map { $0.link })
+        let brandNewItems = newItems.filter { !existingLinks.contains($0.link) }
+        
+        if !brandNewItems.isEmpty {
+            print("Found \(brandNewItems.count) new items in feed")
+        }
+        
+        // Merge items, putting new ones at the top
+        feedItems = brandNewItems + existingItems
+        
+        // Limit to reasonable number to prevent unlimited growth
+        if feedItems.count > 200 {
+            feedItems = Array(feedItems.prefix(200))
+        }
+    }
+
+    // Save and load cache methods
+    private func saveFeedCache() {
+        guard let url = getFileURL(for: "feedcache.json") else { return }
+        
+        do {
+            let cacheData = CacheData(
+                feedCache: feedCache,
+                lastFetchTimes: lastFetchTimes
+            )
+            
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(cacheData)
+            try data.write(to: url)
+            print("✅ Saved feed cache")
+        } catch {
+            print("❌ Failed to save feed cache: \(error)")
+        }
+    }
+
+    private func loadFeedCache() {
+        guard let url = getFileURL(for: "feedcache.json") else { return }
+        
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                let decoder = JSONDecoder()
+                let cacheData = try decoder.decode(CacheData.self, from: data)
+                
+                self.feedCache = cacheData.feedCache
+                self.lastFetchTimes = cacheData.lastFetchTimes
+                print("✅ Loaded feed cache")
+            }
+        } catch {
+            print("❌ Failed to load feed cache: \(error)")
+        }
+    }
+
+    public func updateUnreadStatus() {
+        for source in feedSources {
+            if feedCache[source.url]?.contains(where: { !readLinks.contains($0.link) }) ?? false {
+                sourcesWithUnreadItems.insert(source.id)
+            } else {
+                sourcesWithUnreadItems.remove(source.id)
+            }
+        }
+        objectWillChange.send()
+    }
+    
+    func refreshUnreadStatus() {
+        updateUnreadStatus()
+    }
+
+    
+    func forceRefreshSelectedFeed() {
+        guard let source = selectedSource else { return }
+        
+        let urlString = source.url
+        lastFetchTimes[urlString] = Date(timeIntervalSince1970: 0)
+        
+        
+        loadSelectedFeed()
+    }
+
+    
     func isNew(item: FeedItem) -> Bool {
         !seenLinks.contains(item.link)
+    }
+    
+    func isRead(item: FeedItem) -> Bool {
+        readLinks.contains(item.link)
+    }
+    
+    func markAsRead(item: FeedItem) {
+            readLinks.insert(item.link)
+            saveReadState()
+            updateUnreadStatus()
+            objectWillChange.send()
+        }
+        
+    func markAsUnread(item: FeedItem) {
+            readLinks.remove(item.link)
+            saveReadState()
+            updateUnreadStatus()
+            objectWillChange.send()
+        }
+        
+    func markAllAsRead() {
+        for item in feedItems {
+            readLinks.insert(item.link)
+            }
+        saveReadState()
+        updateUnreadStatus()
+        }
+    
+    func hasUnreadItems(for source: FeedSource) -> Bool {
+        // Use cached data instead of making a network request
+        if let cachedItems = feedCache[source.url] {
+            return cachedItems.contains { !readLinks.contains($0.link) }
+        }
+        
+        // If no cache exists, default to false or trigger a background fetch
+        return false
+    }
+        
+    
+    func clearSelection() {
+        DispatchQueue.main.async {
+            self.selectedSource = nil
+        }
     }
     
 }
@@ -182,15 +458,29 @@ class RSSParser: NSObject, XMLParserDelegate {
     }
 }
 
+
+
 @main
 struct SimpleRSSReaderApp: App {
     @StateObject private var feedViewModel = FeedViewModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(feedViewModel)
+                .onAppear {
+                     // Configure the app delegate here
+                     appDelegate.viewModel = feedViewModel
+                 }
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+                    feedViewModel.saveFeeds()
+                    feedViewModel.saveReadState()
+                }
         }
         .defaultSize(width: 900, height: 800)
+        .windowResizability(.contentSize)
+
     }
 }
+
