@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		31FDEA272DCAF01A00A8FE5B /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 31FDEA262DCAF01A00A8FE5B /* FeedKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		31FA39A62DC5A19A006A2F07 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				31FDEA272DCAF01A00A8FE5B /* FeedKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +130,7 @@
 			);
 			name = SimpleRSS;
 			packageProductDependencies = (
+				31FDEA262DCAF01A00A8FE5B /* FeedKit */,
 			);
 			productName = SimpleRSS;
 			productReference = 31FA39972DC5A198006A2F07 /* SimpleRSS.app */;
@@ -208,6 +214,9 @@
 			);
 			mainGroup = 31FA398E2DC5A198006A2F07;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				31FDEA252DCAF01A00A8FE5B /* XCRemoteSwiftPackageReference "FeedKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 31FA39982DC5A198006A2F07 /* Products */;
 			projectDirPath = "";
@@ -421,7 +430,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.dgrebenyuk.SimpleRSS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -451,7 +460,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.dgrebenyuk.SimpleRSS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -564,6 +573,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		31FDEA252DCAF01A00A8FE5B /* XCRemoteSwiftPackageReference "FeedKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nmdias/FeedKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		31FDEA262DCAF01A00A8FE5B /* FeedKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 31FDEA252DCAF01A00A8FE5B /* XCRemoteSwiftPackageReference "FeedKit" */;
+			productName = FeedKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 31FA398F2DC5A198006A2F07 /* Project object */;
 }

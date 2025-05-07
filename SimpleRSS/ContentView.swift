@@ -43,6 +43,39 @@ struct ContentView: View {
     @State private var editedURL = ""
     @State private var showEditSheet = false
     
+    func formatDate(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        if calendar.isDateInToday(date) {
+            // Format as "Today, 3:45 PM"
+            let formatter = DateFormatter()
+            formatter.dateFormat = "h:mm a"
+            return "Today, \(formatter.string(from: date))"
+        } else if calendar.isDateInYesterday(date) {
+            // Format as "Yesterday, 3:45 PM"
+            let formatter = DateFormatter()
+            formatter.dateFormat = "h:mm a"
+            return "Yesterday, \(formatter.string(from: date))"
+        } else if calendar.dateComponents([.day], from: date, to: now).day! < 7 {
+            // Format as "Monday, 3:45 PM" for dates within the last week
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE, h:mm a"
+            return formatter.string(from: date)
+        } else if calendar.dateComponents([.year], from: date, to: now).year! == 0 {
+            // Format as "May 7, 3:45 PM" for dates in the current year
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d, h:mm a"
+            return formatter.string(from: date)
+        } else {
+            // Format as "May 7, 2024" for older dates
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d, yyyy"
+            return formatter.string(from: date)
+        }
+    }
+
+    
     var body: some View {
         NavigationSplitView {
             // Sidebar
@@ -167,18 +200,27 @@ struct ContentView: View {
                                         // Then open the URL
                                         NSWorkspace.shared.open(url)
                                     } label: {
-                                        HStack {
-                                            Text(item.title)
-                                                .fontWeight(viewModel.isRead(item: item) ? .regular : .bold)
-                                                .foregroundColor(viewModel.isRead(item: item) ? .secondary : .primary)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            HStack {
+                                                Text(item.title)
+                                                    .fontWeight(viewModel.isRead(item: item) ? .regular : .bold)
+                                                    .foregroundColor(viewModel.isRead(item: item) ? .secondary : .primary)
+                                                Spacer()
+                                                if !viewModel.isRead(item: item) {
+                                                    Circle()
+                                                        .fill(Color.blue)
+                                                        .frame(width: 8, height: 8)
+                                                }
+                                            }
+                                            .contentShape(Rectangle())
                                             Spacer()
-                                            if !viewModel.isRead(item: item) {
-                                                Circle()
-                                                    .fill(Color.blue)
-                                                    .frame(width: 8, height: 8)
+                                            if let pubDate = item.pubDate {
+                                                Text(formatDate(pubDate))
+                                                    .font(.caption)
+                                                    .foregroundColor(.gray)
                                             }
                                         }
-                                        .contentShape(Rectangle())
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .buttonStyle(PlainButtonStyle())
                                     .contextMenu {

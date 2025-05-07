@@ -6,6 +6,7 @@
 //
 import SwiftUI
 import Foundation
+import FeedKit
 
 struct AddFeedView: View {
     @State private var name = ""
@@ -61,60 +62,45 @@ struct AddFeedView: View {
             
         }
         
-        private func validateAndAdd() {
-            guard !name.isEmpty, !url.isEmpty else { return }
-            
-            isValidating = true
-            validationError = nil
-            showingError = false
-            
-            guard let feedURL = URL(string: url) else {
-                isValidating = false
-                validationError = "Invalid URL format"
-                showingError = true
-                return
-            }
-            
-            let task = URLSession.shared.dataTask(with: feedURL) { data, response, error in
-                DispatchQueue.main.async {
-                    isValidating = false
-                    
-                    if let error = error {
-                        validationError = "Connection error: \(error.localizedDescription)"
-                        showingError = true
-                        return
+    private func validateAndAdd() {
+        guard !name.isEmpty, !url.isEmpty else { return }
+        
+        isValidating = true
+        validationError = nil
+        showingError = false
+        
+        guard let feedURL = URL(string: url) else {
+            isValidating = false
+            validationError = "Invalid URL format"
+            showingError = true
+            return
+        }
+        
+        let parser = FeedParser(URL: feedURL)
+        parser.parseAsync { result in
+            DispatchQueue.main.async {
+                self.isValidating = false
+                
+                switch result {
+                case .success(let feed):
+                    // Check if we got any feed type
+                    if feed.rssFeed != nil || feed.atomFeed != nil || feed.jsonFeed != nil {
+                        // Feed is valid
+                        self.onAdd(self.name, self.url)
+                        self.isPresented = false
+                    } else {
+                        self.validationError = "Feed format not recognized"
+                        self.showingError = true
                     }
                     
-                    guard let httpResponse = response as? HTTPURLResponse,
-                          (200...299).contains(httpResponse.statusCode) else {
-                        validationError = "Server returned an error"
-                        showingError = true
-                        return
-                    }
-                    
-                    guard let data = data else {
-                        validationError = "No data received"
-                        showingError = true
-                        return
-                    }
-                    
-                    // Try to parse as RSS
-                    let parser = RSSParser(data: data)
-                    let items = parser.parse()
-                    
-                    if items.isEmpty {
-                        validationError = "No feed items found - not a valid RSS feed"
-                        showingError = true
-                        return
-                    }
-                    
-                    // If we get here, the feed is valid
-                    onAdd(name, url)
-                    isPresented = false
+                case .failure(let error):
+                    self.validationError = "Error parsing feed: \(error.localizedDescription)"
+                    self.showingError = true
                 }
             }
-            task.resume()
         }
+    }
+
 }
 
 struct KeyPressHandler: NSViewRepresentable {

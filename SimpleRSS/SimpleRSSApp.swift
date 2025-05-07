@@ -4,11 +4,13 @@
 import SwiftUI
 import Foundation
 import Combine
+import FeedKit
 
 struct FeedItem: Identifiable, Codable, Equatable {
     var id: UUID { UUID(uuidString: link) ?? UUID() }
     let title: String
     let link: String
+    let pubDate: Date?
     var isRead: Bool = false
     
     static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
@@ -484,46 +486,70 @@ class FeedViewModel: ObservableObject {
     
 }
 
-class RSSParser: NSObject, XMLParserDelegate {
+class RSSParser {
     private let data: Data
-    private var items: [FeedItem] = []
-    private var currentElement = ""
-    private var currentTitle = ""
-    private var currentLink = ""
-
+    
     init(data: Data) {
         self.data = data
     }
-
+    
     func parse() -> [FeedItem] {
-        let parser = XMLParser(data: data)
-        parser.delegate = self
-        parser.parse()
+        var items: [FeedItem] = []
+        
+        let parser = FeedParser(data: data)
+        let result = parser.parse()
+        
+        switch result {
+        case .success(let feed):
+            // Handle RSS Feed
+            if let rssFeed = feed.rssFeed {
+                items = rssFeed.items?.compactMap { item in
+                    guard let title = item.title, let link = item.link else { return nil }
+                    return FeedItem(title: title, link: link, pubDate: item.pubDate)
+                } ?? []
+            }
+            
+            // Handle Atom Feed
+            else if let atomFeed = feed.atomFeed {
+                items = atomFeed.entries?.compactMap { entry in
+                    guard let title = entry.title, let link = entry.links?.first?.attributes?.href else { return nil }
+                    return FeedItem(title: title, link: link, pubDate: entry.updated ?? entry.published)
+                } ?? []
+            }
+            
+            // Handle JSON Feed
+            else if let jsonFeed = feed.jsonFeed {
+                items = jsonFeed.items?.compactMap { item -> FeedItem? in
+                    guard let title = item.title ?? item.id, let link = item.url else { return nil }
+                    
+                    // Handle the date based on what type it actually is
+                    let pubDate: Date?
+                    if let dateString = item.datePublished as? String {
+                        // If it's a string, parse it
+                        let dateFormatter = ISO8601DateFormatter()
+                        pubDate = dateFormatter.date(from: dateString)
+                    } else if let date = item.datePublished as? Date {
+                        // If it's already a Date, use it directly
+                        pubDate = date
+                    } else {
+                        // If it's nil or another type, use nil
+                        pubDate = nil
+                    }
+                    
+                    return FeedItem(
+                        title: title,
+                        link: link,
+                        pubDate: pubDate
+                    )
+                } ?? []
+            }
+
+            
+        case .failure(let error):
+            print("Error parsing feed: \(error)")
+        }
+        
         return items
-    }
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        currentElement = elementName
-        if currentElement == "item" {
-            currentTitle = ""
-            currentLink = ""
-        }
-    }
-
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        switch currentElement {
-        case "title": currentTitle += string
-        case "link": currentLink += string
-        default: break
-        }
-    }
-
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "item" {
-            let item = FeedItem(title: currentTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                                link: currentLink.trimmingCharacters(in: .whitespacesAndNewlines))
-            items.append(item)
-        }
     }
 }
 
