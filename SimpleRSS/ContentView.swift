@@ -98,7 +98,18 @@ struct ContentView: View {
                     Button("Add New Feed") {
                         isShowingAddFeed = true
                     }
+                    .toolbar {
+                                ToolbarItem(placement: .primaryAction) {
+                                    Button(action: {
+                                        viewModel.refreshAllFeeds(background: false)
+                                    }) {
+                                        Image(systemName: "arrow.clockwise")
+                                    }
+                                    .help("Refresh All Feeds")
+                                }
+                            }
                     .padding()
+                    
                 }
             }
             .sheet(isPresented: $isShowingAddFeed) {
@@ -193,6 +204,7 @@ struct ContentView: View {
                     }
                 }
             }
+            
             .focusable(true)
                     .onKeyPress(.escape) {
                         if isShowingAddFeed {
@@ -207,5 +219,6 @@ struct ContentView: View {
                         }
                         return .ignored
                     }
+        
     }
 }

@@ -37,11 +37,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var viewModel: FeedViewModel?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        viewModel?.refreshUnreadStatus() // Assuming you created this public method
+        viewModel?.refreshAllFeeds(background: false)
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        viewModel?.refreshUnreadStatus()
+        viewModel?.refreshAllFeeds(background: false)
     }
 }
 
@@ -83,10 +83,10 @@ class FeedViewModel: ObservableObject {
             self.updateUnreadStatus()
         }
         
-        Timer.publish(every: 30, on: .main, in: .common)
+        Timer.publish(every: 15*60, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                self?.updateUnreadStatus()
+                self?.refreshAllFeeds(background: true)
             }
             .store(in: &cancellables)
 
@@ -161,6 +161,75 @@ class FeedViewModel: ObservableObject {
             self.feedSources = []
         }
     }
+    
+    func refreshAllFeeds(background: Bool = false) {
+        // Store the currently selected source
+        let currentlySelected = selectedSource
+        
+        // Set loading state if not in background mode
+        if !background {
+            isLoading = true
+        }
+        
+        // Iterate through all feed sources and refresh each one
+        for source in feedSources {
+            // Clear cache timestamp to force refresh
+            lastFetchTimes[source.url] = Date(timeIntervalSince1970: 0)
+            
+            // Load the feed without changing selection
+            loadFeedWithoutSelecting(from: source.url)
+        }
+        
+        // Ensure we maintain the same selection after refresh
+        DispatchQueue.main.async {
+            self.selectedSource = currentlySelected
+            
+            // If a feed was selected, make sure we show its content
+            if let selected = currentlySelected {
+                self.feedItems = self.feedCache[selected.url] ?? []
+            }
+            
+            // Update loading state
+            if !background {
+                self.isLoading = false
+            }
+        }
+    }
+
+    // Add this helper method to load a feed without changing selection
+    private func loadFeedWithoutSelecting(from urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        
+        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.async {
+                guard let data = data else { return }
+                
+                let parser = RSSParser(data: data)
+                let newItems = parser.parse()
+                
+                // Update cache without changing the displayed items
+                self.updateFeedCache(urlString: urlString, newItems: newItems)
+            }
+        }
+        task.resume()
+    }
+
+    // Helper method to update cache without affecting displayed items
+    private func updateFeedCache(urlString: String, newItems: [FeedItem]) {
+        // Update the cache
+        feedCache[urlString] = newItems
+        lastFetchTimes[urlString] = Date()
+        
+        // Update unread status
+        updateUnreadStatus()
+        
+        // Save cache
+        saveFeedCache()
+    }
+
+
     
     func saveReadState() {
         guard let url = readStateFileURL else { return }
@@ -464,6 +533,7 @@ class RSSParser: NSObject, XMLParserDelegate {
 struct SimpleRSSReaderApp: App {
     @StateObject private var feedViewModel = FeedViewModel()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.appearsActive) private var appearsActive
     
     var body: some Scene {
         WindowGroup {
@@ -473,6 +543,11 @@ struct SimpleRSSReaderApp: App {
                      // Configure the app delegate here
                      appDelegate.viewModel = feedViewModel
                  }
+                .onChange(of: appearsActive) { oldValue, newValue in
+                        if newValue == true { // Window became active
+                            feedViewModel.refreshAllFeeds(background: false)
+                        }
+                    }
                 .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
                     feedViewModel.saveFeeds()
                     feedViewModel.saveReadState()
